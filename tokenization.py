@@ -358,6 +358,12 @@ class WordpieceTokenizer(object):
         output_tokens.extend(sub_tokens)
     return output_tokens
 
+  def convert_tokens_to_ids(self, tokens):
+    return convert_by_vocab(self.vocab, tokens)
+
+  def convert_ids_to_tokens(self, ids):
+    return convert_by_vocab(self.inv_vocab, ids)
+
 
 def _is_whitespace(char):
   """Checks whether `chars` is a whitespace character."""

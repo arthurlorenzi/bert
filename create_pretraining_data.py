@@ -69,19 +69,20 @@ class TrainingInstance(object):
   """A single training instance (sentence pair)."""
 
   def __init__(self, tokens, segment_ids, masked_lm_positions, masked_lm_labels,
-               is_random_next):
+               aligned_lm_positions_a, aligned_lm_positions_b, aligned_lm_weights):
     self.tokens = tokens
     self.segment_ids = segment_ids
-    self.is_random_next = is_random_next
     self.masked_lm_positions = masked_lm_positions
     self.masked_lm_labels = masked_lm_labels
+    self.aligned_lm_positions_a = aligned_lm_positions_a
+    self.aligned_lm_positions_b = aligned_lm_positions_b
+    self.aligned_lm_weights = aligned_lm_weights
 
   def __str__(self):
     s = ""
     s += "tokens: %s\n" % (" ".join(
         [tokenization.printable_text(x) for x in self.tokens]))
     s += "segment_ids: %s\n" % (" ".join([str(x) for x in self.segment_ids]))
-    s += "is_random_next: %s\n" % self.is_random_next
     s += "masked_lm_positions: %s\n" % (" ".join(
         [str(x) for x in self.masked_lm_positions]))
     s += "masked_lm_labels: %s\n" % (" ".join(
@@ -96,6 +97,7 @@ class TrainingInstance(object):
 def write_instance_to_example_files(instances, tokenizer, max_seq_length,
                                     max_predictions_per_seq, output_files):
   """Create TF example files from `TrainingInstance`s."""
+  token_map_size = int(max_seq_length / 2)
   writers = []
   for output_file in output_files:
     writers.append(tf.python_io.TFRecordWriter(output_file))
@@ -107,6 +109,9 @@ def write_instance_to_example_files(instances, tokenizer, max_seq_length,
     input_ids = tokenizer.convert_tokens_to_ids(instance.tokens)
     input_mask = [1] * len(input_ids)
     segment_ids = list(instance.segment_ids)
+    aligned_lm_positions_a = list(instance.aligned_lm_positions_a)
+    aligned_lm_positions_b = list(instance.aligned_lm_positions_b)
+    aligned_lm_weights = list(instance.aligned_lm_weights)
     assert len(input_ids) <= max_seq_length
 
     while len(input_ids) < max_seq_length:
@@ -114,9 +119,17 @@ def write_instance_to_example_files(instances, tokenizer, max_seq_length,
       input_mask.append(0)
       segment_ids.append(0)
 
+    while len(aligned_lm_weights) < token_map_size:
+      aligned_lm_positions_a.append(0)
+      aligned_lm_positions_b.append(0)
+      aligned_lm_weights.append(0)
+
     assert len(input_ids) == max_seq_length
     assert len(input_mask) == max_seq_length
     assert len(segment_ids) == max_seq_length
+    assert len(aligned_lm_positions_a) == token_map_size
+    assert len(aligned_lm_positions_b) == token_map_size
+    assert len(aligned_lm_weights) ==  token_map_size
 
     masked_lm_positions = list(instance.masked_lm_positions)
     masked_lm_ids = tokenizer.convert_tokens_to_ids(instance.masked_lm_labels)
@@ -127,8 +140,6 @@ def write_instance_to_example_files(instances, tokenizer, max_seq_length,
       masked_lm_ids.append(0)
       masked_lm_weights.append(0.0)
 
-    next_sentence_label = 1 if instance.is_random_next else 0
-
     features = collections.OrderedDict()
     features["input_ids"] = create_int_feature(input_ids)
     features["input_mask"] = create_int_feature(input_mask)
@@ -136,7 +147,9 @@ def write_instance_to_example_files(instances, tokenizer, max_seq_length,
     features["masked_lm_positions"] = create_int_feature(masked_lm_positions)
     features["masked_lm_ids"] = create_int_feature(masked_lm_ids)
     features["masked_lm_weights"] = create_float_feature(masked_lm_weights)
-    features["next_sentence_labels"] = create_int_feature([next_sentence_label])
+    features["aligned_lm_positions_a"] = create_int_feature(aligned_lm_positions_a)
+    features["aligned_lm_positions_b"] = create_int_feature(aligned_lm_positions_b)
+    features["aligned_lm_weights"] = create_float_feature(aligned_lm_weights)
 
     tf_example = tf.train.Example(features=tf.train.Features(feature=features))
 
@@ -318,15 +331,27 @@ def create_instances_from_document(
         tokens.append("[SEP]")
         segment_ids.append(1)
 
+        aligned_lm_positions_a = []
+        aligned_lm_positions_b = []
+        aligned_lm_weights = []
+
+        for j in range(min(len(tokens_a), len(tokens_b))):
+          aligned_lm_positions_a.append(j + 1)
+          aligned_lm_positions_b.append(j + len(tokens_a) + 2)
+          aligned_lm_weights.append(1)
+
         (tokens, masked_lm_positions,
          masked_lm_labels) = create_masked_lm_predictions(
              tokens, masked_lm_prob, max_predictions_per_seq, vocab_words, rng)
+        print(len(tokens))
         instance = TrainingInstance(
             tokens=tokens,
             segment_ids=segment_ids,
-            is_random_next=is_random_next,
             masked_lm_positions=masked_lm_positions,
-            masked_lm_labels=masked_lm_labels)
+            masked_lm_labels=masked_lm_labels,
+            aligned_lm_positions_a=aligned_lm_positions_a,
+            aligned_lm_positions_b=aligned_lm_positions_b,
+            aligned_lm_weights=aligned_lm_weights)
         instances.append(instance)
       current_chunk = []
       current_length = 0

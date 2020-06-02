@@ -1,4 +1,9 @@
 # Initially taken from Github's Python gitignore file
+/alignment_output/
+/data/
+/models/
+
+example_alignments.txt
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
