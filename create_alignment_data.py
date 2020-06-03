@@ -90,21 +90,22 @@ def file_len(path):
 
 	return i + 1
 
-
-def data_reader(input_sentence_file, input_mapping_file, rng, sample_size):
+def get_sample(input_sentence_file, input_mapping_file, rng, n=1000):
 	data_size = file_len(input_sentence_file)
-
 	assert data_size == file_len(input_mapping_file)
 
+	return rng.sample(range(0, data_size), n)
+
+
+def data_reader(input_sentence_file, input_mapping_file, sample):
 	sent_reader = tf.gfile.GFile(input_sentence_file, "r")
 	map_reader = tf.gfile.GFile(input_mapping_file, "r")
 
-	if sample_size:
-		sample = set(rng.sample(range(0, data_size), sample_size))
+	sent_line = sent_reader.readline()
+	map_line = map_reader.readline()
 
+	if sample:
 		i = 0
-		sent_line = sent_reader.readline()
-		map_line = map_reader.readline()
 		while sent_line and map_line:
 			if i in sample:
 				yield sent_line, map_line
@@ -113,8 +114,6 @@ def data_reader(input_sentence_file, input_mapping_file, rng, sample_size):
 			sent_line = sent_reader.readline()
 			map_line = map_reader.readline()
 	else:
-		sent_line = sent_reader.readline()
-		map_line = map_reader.readline()
 		while sent_line and map_line:
 			yield sent_line, map_line
 			sent_line = sent_reader.readline()
@@ -199,58 +198,6 @@ def create_float_feature(values):
 	return feature
 
 
-def input_fn_builder(instances, tokenizer, max_seq_length):
-	"""Creates an `input_fn` closure to be passed to TPUEstimator."""
-
-	all_input_ids = []
-	all_input_mask = []
-	all_input_type_ids = []
-
-	for instance in instances:
-		input_ids = tokenizer.convert_tokens_to_ids(instance.tokens)
-		input_mask = [1] * len(input_ids)
-		segment_ids = instance.segment_ids.copy()
-
-		while len(input_ids) < max_seq_length:
-			input_ids.append(0)
-			input_mask.append(0)
-			segment_ids.append(0)
-
-		all_input_ids.append(input_ids)
-		all_input_mask.append(input_mask)
-		all_input_type_ids.append(segment_ids)
-
-	def input_fn(params):
-		"""The actual input function."""
-		batch_size = params["batch_size"]
-
-		num_examples = len(instances)
-
-		# This is for demo purposes and does NOT scale to large data sets. We do
-		# not use Dataset.from_generator() because that uses tf.py_func which is
-		# not TPU compatible. The right way to load data is with TFRecordReader.
-		d = tf.data.Dataset.from_tensor_slices({
-				"input_ids":
-						tf.constant(
-								all_input_ids, shape=[num_examples, max_seq_length],
-								dtype=tf.int32),
-				"input_mask":
-						tf.constant(
-								all_input_mask,
-								shape=[num_examples, max_seq_length],
-								dtype=tf.int32),
-				"input_type_ids":
-						tf.constant(
-								all_input_type_ids,
-								shape=[num_examples, max_seq_length],
-								dtype=tf.int32),
-		})
-
-		d = d.batch(batch_size=batch_size, drop_remainder=False)
-		return d
-
-	return input_fn
-
 def model_fn_builder(bert_config, init_checkpoint, use_tpu,
 										 use_one_hot_embeddings):
 	"""Returns `model_fn` closure for TPUEstimator."""
@@ -305,7 +252,7 @@ def model_fn_builder(bert_config, init_checkpoint, use_tpu,
 	return model_fn
 
 
-def get_pretrained_embeddings(instances, tokenizer):
+def get_embedding_estimator():
 	bert_config = modeling.BertConfig.from_json_file(FLAGS.bert_config_file)
 
 	is_per_host = tf.contrib.tpu.InputPipelineConfig.PER_HOST_V2
@@ -329,6 +276,63 @@ def get_pretrained_embeddings(instances, tokenizer):
 			config=run_config,
 			predict_batch_size=FLAGS.batch_size)
 
+	return estimator
+
+
+def input_fn_builder(instances, tokenizer, max_seq_length):
+	"""Creates an `input_fn` closure to be passed to TPUEstimator."""
+
+	all_input_ids = []
+	all_input_mask = []
+	all_input_type_ids = []
+
+	for instance in instances:
+		input_ids = tokenizer.convert_tokens_to_ids(instance.tokens)
+		input_mask = [1] * len(input_ids)
+		segment_ids = instance.segment_ids.copy()
+
+		while len(input_ids) < max_seq_length:
+			input_ids.append(0)
+			input_mask.append(0)
+			segment_ids.append(0)
+
+		all_input_ids.append(input_ids)
+		all_input_mask.append(input_mask)
+		all_input_type_ids.append(segment_ids)
+
+	def input_fn(params):
+		"""The actual input function."""
+		batch_size = params["batch_size"]
+
+		num_examples = len(instances)
+
+		# This is for demo purposes and does NOT scale to large data sets. We do
+		# not use Dataset.from_generator() because that uses tf.py_func which is
+		# not TPU compatible. The right way to load data is with TFRecordReader.
+		d = tf.data.Dataset.from_tensor_slices({
+				"input_ids":
+						tf.constant(
+								all_input_ids, shape=[num_examples, max_seq_length],
+								dtype=tf.int32),
+				"input_mask":
+						tf.constant(
+								all_input_mask,
+								shape=[num_examples, max_seq_length],
+								dtype=tf.int32),
+				"input_type_ids":
+						tf.constant(
+								all_input_type_ids,
+								shape=[num_examples, max_seq_length],
+								dtype=tf.int32),
+		})
+
+		d = d.batch(batch_size=batch_size, drop_remainder=False)
+		return d
+
+	return input_fn
+
+
+def get_pretrained_embeddings(estimator, instances, tokenizer):
 	input_fn = input_fn_builder(
 			instances=instances, tokenizer=tokenizer, max_seq_length=FLAGS.max_seq_length)
 
@@ -339,16 +343,13 @@ def get_pretrained_embeddings(instances, tokenizer):
 
 
 def write_instance_to_example_files(instances, tokenizer, max_seq_length,
-																		output_files):
+																		writers, estimator):
 	"""Create TF example files from `TrainingInstance`s."""
 	token_map_size = int(max_seq_length / 2)
-	writers = []
-	for output_file in output_files:
-		writers.append(tf.python_io.TFRecordWriter(output_file))
 
 	writer_index = 0
 	total_written = 0
-	pretrain_emb = get_pretrained_embeddings(instances, tokenizer)
+	pretrain_emb = get_pretrained_embeddings(estimator, instances, tokenizer)
 
 	for (inst_index, instance) in enumerate(instances):
 		input_ids = tokenizer.convert_tokens_to_ids(instance.tokens)
@@ -410,18 +411,14 @@ def write_instance_to_example_files(instances, tokenizer, max_seq_length,
 				tf.logging.info(
 						"%s: %s" % (feature_name, " ".join([str(x) for x in values])))
 
-	for writer in writers:
-		writer.close()
-
 	tf.logging.info("Wrote %d total instances", total_written)
 
 
 def create_training_instances(input_sentence_file, input_mapping_file,
-															tokenizer, max_seq_length, rng, sample_size,
-															do_lower_case):
+															tokenizer, max_seq_length, rng, do_lower_case,
+															sample=None):
 	instances = []
-	reader = data_reader(input_sentence_file, input_mapping_file, rng,
-			sample_size)
+	reader = data_reader(input_sentence_file, input_mapping_file, sample)
 	
 	for sent_line, map_line in reader:
 		line = tokenization.convert_to_unicode(sent_line)
@@ -498,21 +495,32 @@ def create_instance(a, b, align, tokenizer, max_seq_length, rng, do_lower_case):
 def main(_):
 	tf.logging.set_verbosity(tf.logging.INFO)
 
+	output_files = FLAGS.output_file.split(",")
+	writers = [tf.python_io.TFRecordWriter(out) for out in output_files]
+
+	rng = random.Random(FLAGS.random_seed)
+
 	tokenizer = tokenization.WordpieceTokenizer(
 			vocab=tokenization.load_vocab(FLAGS.vocab_file))
 
-	rng = random.Random(FLAGS.random_seed)
-	instances = create_training_instances(
-		FLAGS.input_sentence_file, FLAGS.input_mapping_file, tokenizer,
-		FLAGS.max_seq_length, rng, FLAGS.sample_size, FLAGS.do_lower_case)
+	estimator = get_embedding_estimator()
 
-	output_files = FLAGS.output_file.split(",")
-	tf.logging.info("*** Writing to output files ***")
-	for output_file in output_files:
-		tf.logging.info("  %s", output_file)
+	sample = get_sample(FLAGS.input_sentence_file, FLAGS.input_mapping_file,
+		rng, FLAGS.sample_size)
+	batches = list(range(0, len(sample), 3000)) + [len(sample)]
 
-	write_instance_to_example_files(instances, tokenizer, FLAGS.max_seq_length,
-																	output_files)
+	for brange in zip(batches, batches[1:]):
+		batch_sample = sample[brange[0]:brange[1]]
+
+		instances = create_training_instances(
+			FLAGS.input_sentence_file, FLAGS.input_mapping_file, tokenizer,
+			FLAGS.max_seq_length, rng, FLAGS.do_lower_case, batch_sample)
+
+		write_instance_to_example_files(instances, tokenizer, FLAGS.max_seq_length,
+																		writers, estimator)
+
+	for writer in writers:
+		writer.close()
 
 
 if __name__ == "__main__":
@@ -520,4 +528,5 @@ if __name__ == "__main__":
 	flags.mark_flag_as_required("input_mapping_file")
 	flags.mark_flag_as_required("output_file")
 	flags.mark_flag_as_required("vocab_file")
+	flags.mark_flag_as_required("sample_size")
 	tf.app.run()

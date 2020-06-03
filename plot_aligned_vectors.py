@@ -99,7 +99,7 @@ def get_embeddings(sentences):
 		for p in sent_info["pos"]
 	]
 
-	# bert-serving-start -pooling_layer -1 -pooling_strategy NONE -max_seq_len 256 -model_dir multi_aligned_cased_L-12_H-768_A-12
+	# bert-serving-start -pooling_layer -1 -pooling_strategy NONE -max_seq_len 256 -model_dir models/multi_aligned_cased_L-12_H-768_A-12
 	res = bc.encode(flat, is_tokenized=True)
 	sel = res[np.arange(len(res)), positions]
 	
@@ -127,7 +127,7 @@ pairs = [
 K = 15
 
 tokenizer = tokenization.WordpieceTokenizer(
-		vocab=tokenization.load_vocab("/home/arthur/Projects/bert/multi_aligned_cased_L-12_H-768_A-12/vocab.txt"))
+		vocab=tokenization.load_vocab("/home/arthur/Projects/bert/models/multi_aligned_cased_L-12_H-768_A-12/vocab.txt"))
 
 sents = get_sentences(lines, pairs, tokenizer, k=K)
 embs = get_embeddings(sents)
