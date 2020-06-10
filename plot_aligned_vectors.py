@@ -1,10 +1,12 @@
 import os
 import itertools
+import random
 from collections import defaultdict
 import numpy as np
 from bert_serving.client import BertClient
 
 import tokenization
+from create_alignment_data import get_sample
 
 def load_aligned_words(string):
 	string = string.replace('\n', '')
@@ -99,8 +101,8 @@ def get_embeddings(sentences):
 		for p in sent_info["pos"]
 	]
 
-	# bert-serving-start -pooling_layer -1 -pooling_strategy NONE -max_seq_len 256 -model_dir models/multi_aligned_cased_L-12_H-768_A-12
-	res = bc.encode(flat, is_tokenized=True)
+	# bert-serving-start -show_tokens_to_client -pooling_layer -1 -pooling_strategy NONE -max_seq_len 256 -model_dir models/multi_aligned_cased_L-12_H-768_A-12
+	res, _ = bc.encode(flat, show_tokens=True, is_tokenized=True)
 	sel = res[np.arange(len(res)), positions]
 	
 	return sel.reshape((len(sentences), -1, 2, sel.shape[-1]))
@@ -110,7 +112,7 @@ sent_path = os.path.join("data", "fastalign-europarl.pt-en")
 sent_fp = open(sent_path, 'r')
 lines = sent_fp.read().splitlines()
 
-# map_path = os.path.join("data", "fastalign-europarl.pt-en.intersect.align")
+map_path = os.path.join("data", "fastalign-europarl.pt-en.intersect.align")
 # map_fp = open(map_path, 'r')
 # maps = map_fp.read().splitlines()
 
@@ -123,22 +125,31 @@ pairs = [
 	('question', 'questão'),
 	('I', 'eu'),
 	('opportunity', 'oportunidade'),
+	('problem', 'problema'),
+	('love', 'amor'),
 ]
-K = 15
+K = 10
 
 tokenizer = tokenization.WordpieceTokenizer(
 		vocab=tokenization.load_vocab("/home/arthur/Projects/bert/models/multi_aligned_cased_L-12_H-768_A-12/vocab.txt"))
+
+rng = random.Random(1234)
+sample = set(get_sample(sent_path, map_path, rng, 50000))
+lines = [
+	l for i,l in enumerate(lines)
+	if i in sample
+]
 
 sents = get_sentences(lines, pairs, tokenizer, k=K)
 embs = get_embeddings(sents)
 
 from sklearn.manifold import TSNE
 X = embs.reshape((-1, embs.shape[-1]))
-X_embedded = TSNE(n_components=2).fit_transform(X)
+X_embedded = TSNE(n_components=2, perplexity=20, metric='cosine').fit_transform(X)
 X_embedded.shape
 
 import matplotlib.pyplot as plt
-markers = ["o", "v", "x", "s", "^"]
+markers = ["o", "v", "x", "s", "^", ">", "<"]
 data_ranges = list(range(0, len(X_embedded), K * 2)) + [len(X_embedded)]
 
 for i in range(len(pairs)):
@@ -150,7 +161,8 @@ for i in range(len(pairs)):
 	l2 = data[1::2]
 	plt.scatter(l2[:,0], l2[:,1], c='red', label=pairs[i][1], marker=markers[i])
 
-plt.legend(fontsize='small', loc='upper right')
+plt.legend(bbox_to_anchor=(1.04, 0.5), loc='center left')
+plt.subplots_adjust(right=0.7)
 plt.savefig('contextual_word_graph.png')
 
 

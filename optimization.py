@@ -60,8 +60,8 @@ def create_optimizer(loss, init_lr, num_train_steps, num_warmup_steps, use_tpu):
       learning_rate=learning_rate,
       weight_decay_rate=0.01,
       beta_1=0.9,
-      beta_2=0.999,
-      epsilon=1e-6,
+      beta_2=0.98,
+      epsilon=1e-9,
       exclude_from_weight_decay=["LayerNorm", "layer_norm", "bias"])
 
   if use_tpu:

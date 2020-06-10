@@ -57,11 +57,11 @@
         "--vocab_file=${cwd}/models/multi_cased_L-12_H-768_A-12/vocab.txt",
         "--bert_config_file=${cwd}/models/multi_cased_L-12_H-768_A-12/bert_config.json",
         "--init_checkpoint=${cwd}/models/multi_cased_L-12_H-768_A-12/bert_model.ckpt",
-        "--output_file=${cwd}/data/256-20000-12345-fastalign-europarl.pt-en.tfrecord",
+        "--output_file=${cwd}/data/256-1000-12345-fastalign-europarl.pt-en.tfrecord",
         "--layers=-1",
         "--do_lower_case=False",
         "--max_seq_length=256",
-        "--sample_size=20000",
+        "--sample_size=1000",
         "--random_seed=12345"
       ]
     },
@@ -72,7 +72,7 @@
       "program": "${cwd}/run_alignment.py",
       "console": "integratedTerminal",
       "args": [
-        "--input_file=${cwd}/data/256-20000-12345-fastalign-europarl.pt-en.tfrecord",
+        "--input_file=${cwd}/data/256-1000-12345-fastalign-europarl.pt-en.tfrecord",
         "--output_dir=${cwd}/alignment_output",
         "--do_train=True",
         // "--do_eval=True",
@@ -80,9 +80,10 @@
         "--init_checkpoint=${cwd}/models/multi_cased_L-12_H-768_A-12/bert_model.ckpt",
         "--train_batch_size=2",
         "--max_seq_length=256",
-        "--num_train_steps=10000",
-        "--num_warmup_steps=1000",
-        "--learning_rate=5e-5"
+        "--num_train_steps=500",
+        "--num_warmup_steps=50",
+        "--learning_rate=5e-5",
+        "--lambda_coef=1"
       ]
     }
   ]

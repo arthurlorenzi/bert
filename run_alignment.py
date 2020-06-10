@@ -105,10 +105,15 @@ flags.DEFINE_integer(
     "num_tpu_cores", 8,
     "Only used if `use_tpu` is True. Total number of TPU cores to use.")
 
+flags.DEFINE_float(
+    "lambda_coef", 1,
+    "Weight of initialization difference error objective.")
+
+
 
 def model_fn_builder(bert_config, init_checkpoint, learning_rate,
                      num_train_steps, num_warmup_steps, use_tpu,
-                     use_one_hot_embeddings):
+                     use_one_hot_embeddings, lambda_coef):
   """Returns `model_fn` closure for TPUEstimator."""
 
   def model_fn(features, labels, mode, params):  # pylint: disable=unused-argument
@@ -144,7 +149,7 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
     pretrain_diff_loss = get_pretrain_diff_output(all_layers[-1],
       pretrain_embedding, segment_ids)
 
-    total_loss = aligned_lm_loss + pretrain_diff_loss
+    total_loss = aligned_lm_loss + (lambda_coef * pretrain_diff_loss)
 
     tvars = tf.trainable_variables()
 
@@ -273,7 +278,7 @@ def get_pretrain_diff_output(input_tensor, pretrain_tensor, segment_ids):
   per_token_loss = token_mask * tf.reduce_sum(squared_errors, 2)
 
   loss = tf.reduce_sum(per_token_loss)
-  loss = tf.Print(loss, [loss])
+  # loss = tf.Print(loss, [loss])
   return loss
 
 
@@ -285,6 +290,7 @@ def get_aligned_lm_output(input_tensor, positions_a, positions_b, token_mask):
   per_token_loss = tf.reshape(token_mask, [-1]) * tf.reduce_sum(squared_errors, 1)
 
   loss = tf.reduce_sum(per_token_loss)
+  # loss = tf.Print(loss, [loss])
   return loss
 
 
@@ -452,7 +458,8 @@ def main(_):
       num_train_steps=FLAGS.num_train_steps,
       num_warmup_steps=FLAGS.num_warmup_steps,
       use_tpu=FLAGS.use_tpu,
-      use_one_hot_embeddings=FLAGS.use_tpu)
+      use_one_hot_embeddings=FLAGS.use_tpu,
+      lambda_coef=FLAGS.lambda_coef)
 
   # If TPU is not available, this will fall back to normal Estimator on CPU
   # or GPU.
